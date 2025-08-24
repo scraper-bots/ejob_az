@@ -221,9 +221,26 @@ class WorkingEjobScraper:
             
             try:
                 response = self.session.get(url, timeout=10)
-                if response.status_code != 200:
-                    print(f"   ❌ Page {page_num} returned {response.status_code}, stopping")
-                    break
+                if response.status_code == 404:
+                    consecutive_404s += 1
+                    print(f"   ⚠️  Page {page_num} returned 404 (consecutive: {consecutive_404s})")
+                    
+                    # If we get 3 consecutive 404s, stop (likely reached end)
+                    if consecutive_404s >= 3:
+                        print(f"   🛑 3 consecutive 404s detected. Likely reached end of available pages.")
+                        break
+                    
+                    # Otherwise continue to next page (might be temporary issue)
+                    continue
+                elif response.status_code != 200:
+                    print(f"   ❌ Page {page_num} returned {response.status_code}")
+                    consecutive_404s += 1
+                    if consecutive_404s >= 3:
+                        print(f"   🛑 Too many consecutive errors. Stopping.")
+                        break
+                    continue
+                else:
+                    consecutive_404s = 0  # Reset counter on successful request
                 
                 # Extract CV links
                 cv_links = re.findall(r'/cv/[^\"\'\>\s]+', response.text)
@@ -284,19 +301,42 @@ class WorkingEjobScraper:
         print(f"💾 Saved {len(candidates)} candidates to {filename}")
 
 def main():
-    max_pages = 5  # Default
-    if len(sys.argv) >= 2:
-        max_pages = int(sys.argv[1])
+    start_page = 1
+    end_page = 5  # Default
+    
+    # Parse command line arguments
+    if len(sys.argv) >= 2 and sys.argv[1] in ['--help', '-h', 'help']:
+        print("🚀 Ultimate ejob.az Scraper - Working Version with OCR")
+        print("Usage: python ejob_scraper.py [start_page] [end_page]")
+        print("Examples:")
+        print("  python ejob_scraper.py 5           # Scrape pages 1-5")
+        print("  python ejob_scraper.py 49 60       # Resume from page 49 to 60")
+        print("  python ejob_scraper.py 1 100       # Scrape pages 1-100")
+        return
+    
+    try:
+        if len(sys.argv) == 2:
+            # Single argument: end page (start from page 1)
+            end_page = int(sys.argv[1])
+        elif len(sys.argv) == 3:
+            # Two arguments: start page and end page
+            start_page = int(sys.argv[1])
+            end_page = int(sys.argv[2])
+    except ValueError:
+        print("❌ Error: Please provide valid page numbers")
+        print("Usage: python ejob_scraper.py [start_page] [end_page]")
+        print("Use 'python ejob_scraper.py --help' for more information")
+        return
     
     print(f"🚀 ULTIMATE ejob.az Scraper")
     print(f"📱 OCR Phone Extraction + Verification Links")
-    print(f"📄 Processing up to {max_pages} pages")
+    print(f"📄 Processing pages {start_page} to {end_page}")
     print("=" * 50)
     
     start_time = time.time()
     
     scraper = WorkingEjobScraper()
-    candidates = scraper.scrape_all_pages(max_pages=max_pages)
+    candidates = scraper.scrape_all_pages(start_page=start_page, end_page=end_page)
     
     end_time = time.time()
     
@@ -308,7 +348,7 @@ def main():
         # Statistics
         phones_extracted = sum(1 for c in candidates if c['phone'] and len(c['phone']) >= 9 and 'check' not in c['phone'].lower())
         emails_extracted = sum(1 for c in candidates if c['email'] and '@' in c['email'])
-        pages_processed = max_pages if len(candidates) >= max_pages * 20 else len(candidates) // 20 + 1
+        pages_processed = end_page - start_page + 1 if len(candidates) >= (end_page - start_page + 1) * 20 else len(candidates) // 20 + 1
         
         print("=" * 50)
         print(f"✅ SCRAPING COMPLETED!")
